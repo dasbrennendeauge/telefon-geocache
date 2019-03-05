@@ -1,7 +1,5 @@
 #include <Wire.h> //Wire Bibliothek einbinden
-
 #include <LiquidCrystal_I2C.h>
-
 #include <SoftwareSerial.h>     //please put less than and greater than sign respectively in place of  =
 
 SoftwareSerial SIM900(10, 11); // (RX, TX). please zoom image above to see exactly what is going where.
