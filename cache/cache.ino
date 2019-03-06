@@ -76,8 +76,10 @@ void decreaseTimer() {
   if(secondsRemaining <= 0) {
     enterSleep();
   }
+  char line[20] = "";
+  sprintf(line, "%3d Sekunden   ", secondsRemaining);
   lcd.setCursor(0,3);
-  lcd.print(secondsRemaining);
+  lcd.print(line);
 }
 
 void enterSleep() {
