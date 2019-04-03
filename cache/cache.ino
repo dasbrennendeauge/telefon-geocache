@@ -4,6 +4,7 @@
 #include <SoftwareSerial.h>
 #include <Keypad.h>
 
+// GSM Calls: https://www.activexperts.com/serial-port-component/tutorials/gsmdial/
 
 #define TIME_TO_LIVE 300
 
@@ -56,6 +57,8 @@ static DFMiniMp3<SoftwareSerial, Mp3Notify> mp3(mySoftwareSerial);
 
 LiquidCrystal_I2C lcd(0x27, 20, 4); //Hier wird das Display benannt. In unserem //Fall „lcd“. Die I²C Adresse (Erläuterung und I²C Adressen Scanner in folgender Anleitung: Link zur Anleitung „2 I²C Displays gleichzeitig“) 0x27 wird auch angegeben.
 
+SoftwareSerial SIM900(10, 11); 
+
 unsigned long startMillis;
 int step = 1;
 bool refreshDisplay = false;
@@ -64,9 +67,10 @@ int numberCounter = 0;
 
 void setup() {
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle Schnittstelle
+  SIM900.begin(19200);
   Serial.println("Arduino start");
   // -> Arduino start -> GSM start
-  lcd.init();
+  lcd.begin();
   lcd.backlight();//Beleuchtung des Displays einschalten
   startMillis = millis();
   refreshDisplay = true;
@@ -108,6 +112,7 @@ void step1() {
 
 void step2() {
   if(refreshDisplay == true) {
+    lcd.clear();
     showTextAndPlayMp3(
       "Deine Handynummer:  ",
       number,
