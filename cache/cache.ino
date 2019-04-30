@@ -24,6 +24,8 @@ byte colPins[COLS] = { 31, 32, 33 };
 // Create the Keypad
 Keypad kpd = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
 
+const int analogInPin = A8;  // Data Muenzeinwurf
+
 // DFPlayer Mini
 SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
 // implement a notification class,
@@ -60,10 +62,14 @@ LiquidCrystal_I2C lcd(0x27, 20, 4); //Hier wird das Display benannt. In unserem 
 SoftwareSerial SIM900(10, 11); 
 
 unsigned long startMillis;
+unsigned long stepStartMillis;
 int step = 1;
 bool refreshDisplay = false;
 char number[20] = "";
 int numberCounter = 0;
+
+String expected = String("4711"); // TODO: ersetze mit angerufener Nummer
+String pin = String("");
 
 void setup() {
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle Schnittstelle
@@ -74,7 +80,6 @@ void setup() {
   lcd.backlight();//Beleuchtung des Displays einschalten
   startMillis = millis();
   refreshDisplay = true;
-  pinMode(53, INPUT);
 }
 
 // -> Displayanzeige "Hallo, willkommen zu meinem Cache. Du hast 5 Minuten Zeit und nur einen Versuch."
@@ -90,6 +95,10 @@ void loop() {
     step3();
   } else if(step == 4) {
     step4();
+  } else if(step == 5) {
+    step5();
+  } else if(step == 6) {
+    step6();
   }
   decreaseTimer();
 }
@@ -143,9 +152,12 @@ void step3() {
     refreshDisplay = false;
   }
 
-  int val = digitalRead(53);
-  if(val == 1) {
+  // read the analog in value:
+  int sensorValue = analogRead(analogInPin);
+
+  if (sensorValue != 0) {
     step = 4;
+    stepStartMillis = millis();
     refreshDisplay = true;    
     Serial.println("Pling!");
   }
@@ -160,6 +172,55 @@ void step4() {
     refreshDisplay = false;
   }
   // TODO: GSM anruf starten
+
+    unsigned long currentMillis = millis();
+    int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
+    if(secondsElapsed > 5) {
+      step = 5;
+      refreshDisplay = true;
+    }
+}
+
+void step5() {
+  if(refreshDisplay == true) {
+    lcd.clear();
+    showTextAndPlayMp3(
+      "Wer rief dich an?   ",
+      "Gib letzte 4 Zahlen:",
+      pin.c_str(), 5);  
+    refreshDisplay = false;
+  }
+
+  char key = kpd.getKey();
+  if(key) {
+    pin.concat(key);
+    Serial.println(key);
+    if(pin.length() == 4) {
+      step = 6;
+      refreshDisplay = true;
+      return;
+    }
+    refreshDisplay = true;
+  }
+}
+
+void step6() {
+  if(refreshDisplay == true) {
+    lcd.clear();
+    if(pin == expected) {
+      // TODO: Klappe oeffnen
+      showTextAndPlayMp3(
+        "Geschafft.          ",
+        "Trag dich ein, dann ",
+        "Klappe zu.          ", 6);
+    } else {
+      showTextAndPlayMp3(
+        "Computer sagt:      ",
+        "NEIN                ",
+        "                    ", 6);
+    }
+    refreshDisplay = false;
+  }
 }
 
 void showTextAndPlayMp3(char *line1, char *line2, char *line3, uint16_t track) {
