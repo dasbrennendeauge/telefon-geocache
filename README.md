@@ -32,6 +32,10 @@ Hörer abheben
 -> Klappe unten öffnet (Relais)
 -> Displayanzeige & Sound: "Trag dich ein, schließ die Klappe und häng auf."
 
+### bisherige Umsetzung
+
+[![](http://img.youtube.com/vi/i5rzEiwlTfw/0.jpg)](http://www.youtube.com/watch?v=i5rzEiwlTfw "")
+
 ### Benötigte Elektronik:
 - Arduino 
 - MP3-Player (2)
