@@ -1,0 +1,16 @@
+Listen 9992
+<VirtualHost *:9992>
+	ServerAdmin webmaster@localhost
+
+	DocumentRoot /var/www/telefoncache
+
+	SetEnv SIPGATE_CREDENTIALS XXXXXXXXXXXXXXXxxxxxxx==
+
+	<Directory /var/www/telefoncache>
+		Options -Indexes
+		AllowOverride All
+		Order allow,deny
+		allow from all
+	</Directory>
+
+</VirtualHost>
