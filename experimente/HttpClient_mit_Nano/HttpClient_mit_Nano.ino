@@ -10,9 +10,14 @@
 // Set serial for debug console (to the Serial Monitor, default speed 115200)
 #define SerialMon Serial
 
-// Software Serial on Uno, Nano
-#include <SoftwareSerial.h>
-SoftwareSerial SerialAT(8,7); // RX, TX
+// Software Serial on Nano
+// #include <SoftwareSerial.h>
+// SoftwareSerial SerialAT(8,7); // RX, TX
+
+// Set serial for AT commands (to the module)
+// Use Hardware Serial on Mega
+// RX118 & TX119
+#define SerialAT Serial1
 
 // set GSM PIN, if any
 #define GSM_PIN ""
