@@ -40,7 +40,7 @@ public:
     Serial.println(errorCode);
   }
   static void OnPlayFinished(uint16_t track) {
-    Serial.print("Track beendet");
+    Serial.print("Track beendet ");
     Serial.println(track);
     delay(100);
     // TODO: nächsten Schritt aufrufen
@@ -55,15 +55,13 @@ public:
     Serial.println(F("SD Karte entfernt "));
   }
 };
-static DFMiniMp3<SoftwareSerial, Mp3Notify> mp3(mySoftwareSerial);
+static DFMiniMp3<HardwareSerial, Mp3Notify> mp3(Serial3);
 
 LiquidCrystal_I2C lcd(0x27, 20, 4); //Hier wird das Display benannt. In unserem //Fall „lcd“. Die I²C Adresse (Erläuterung und I²C Adressen Scanner in folgender Anleitung: Link zur Anleitung „2 I²C Displays gleichzeitig“) 0x27 wird auch angegeben.
 
-SoftwareSerial SIM900(10, 11); 
-
 unsigned long startMillis;
 unsigned long stepStartMillis;
-int step = 1;
+int step = 0;
 bool refreshDisplay = false;
 char number[20] = "";
 int numberCounter = 0;
@@ -73,9 +71,14 @@ String pin = String("");
 
 void setup() {
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle Schnittstelle
-  SIM900.begin(19200);
   Serial.println("Arduino start");
+
+  // DFPlayer Mini initialisieren
+  mp3.begin();
+  mp3.setVolume(15);
+  
   // -> Arduino start -> GSM start
+
   lcd.begin();
   lcd.backlight();//Beleuchtung des Displays einschalten
   startMillis = millis();
@@ -87,7 +90,10 @@ void setup() {
 // -> Display zeigt 5-Minuten-Zähler an
 
 void loop() {
-  if(step == 1) {
+  mp3.loop();
+  if(step == 0) {
+    step0();
+  } else if(step == 1) {
     step1();
   } else if(step == 2) {
     step2();
@@ -103,6 +109,24 @@ void loop() {
   decreaseTimer();
 }
 
+void step0() {
+  if(refreshDisplay == true) {
+    showTextAndPlayMp3(
+      "                    ",
+      "Hoerer ans Ohr!     ",
+      "                    ", 1);
+    refreshDisplay = false;
+  }
+  unsigned long currentMillis = millis();
+  int secondsElapsed = (currentMillis - startMillis) / 1000;
+  if(secondsElapsed > 2) {
+    step = 1;
+    mp3.playMp3FolderTrack(1);
+    stepStartMillis = millis();
+    refreshDisplay = true;
+  }
+}
+
 void step1() {
   if(refreshDisplay == true) {
     showTextAndPlayMp3(
@@ -111,10 +135,12 @@ void step1() {
       "                    ", 1);
     refreshDisplay = false;
   }
+
     unsigned long currentMillis = millis();
-    int secondsElapsed = (currentMillis - startMillis) / 1000;
-    if(secondsElapsed > 1) {
+    int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
+    if(secondsElapsed > 6) {
       step = 2;
+      mp3.playMp3FolderTrack(2);
       refreshDisplay = true;
     }
 }
@@ -133,6 +159,7 @@ void step2() {
   if(key) {
     if(key == '#') {
       step = 3;
+      mp3.playMp3FolderTrack(3);
       refreshDisplay = true;
       return;
     }
@@ -157,6 +184,7 @@ void step3() {
 
   if (sensorValue != 0) {
     step = 4;
+    mp3.playMp3FolderTrack(4);
     stepStartMillis = millis();
     refreshDisplay = true;    
     Serial.println("Pling!");
@@ -177,6 +205,7 @@ void step4() {
     int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
     if(secondsElapsed > 5) {
       step = 5;
+      mp3.playMp3FolderTrack(5);
       refreshDisplay = true;
     }
 }
@@ -197,6 +226,7 @@ void step5() {
     Serial.println(key);
     if(pin.length() == 4) {
       step = 6;
+      mp3.playMp3FolderTrack(6);      
       refreshDisplay = true;
       return;
     }
