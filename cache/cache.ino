@@ -59,6 +59,38 @@ static DFMiniMp3<HardwareSerial, Mp3Notify> mp3(Serial3);
 
 LiquidCrystal_I2C lcd(0x27, 20, 4); //Hier wird das Display benannt. In unserem //Fall „lcd“. Die I²C Adresse (Erläuterung und I²C Adressen Scanner in folgender Anleitung: Link zur Anleitung „2 I²C Displays gleichzeitig“) 0x27 wird auch angegeben.
 
+// Select your modem:
+#define TINY_GSM_MODEM_SIM800
+
+// Increase RX buffer to capture the entire response
+// Chips without internal buffering (A6/A7, ESP8266, M590)
+// need enough space in the buffer for the entire response
+// else data will be lost (and the http library will fail).
+#define TINY_GSM_RX_BUFFER 512
+
+// Set serial for AT commands (to the module)
+// Use Hardware Serial on Mega
+// RX118 & TX119
+#define SerialAT Serial1
+
+// Your GPRS credentials
+// Leave empty, if missing user or pass
+const char apn[]  = "sipgate";
+const char gprsUser[] = "sipgate";
+const char gprsPass[] = "sipgate";
+
+// Server details
+const char server[] = "dev.rotmanov.de";
+const char resource[] = "/?number=491787777948";
+const int  port = 9992;
+
+#include <TinyGsmClient.h>
+#include <ArduinoHttpClient.h>
+
+TinyGsm modem(SerialAT);
+TinyGsmClient client(modem);
+HttpClient http(client, server, port);
+
 unsigned long startMillis;
 unsigned long stepStartMillis;
 int step = 0;
@@ -78,7 +110,21 @@ void setup() {
   mp3.setVolume(15);
   
   // -> Arduino start -> GSM start
+ 
+  // Set GSM module baud rate
+  SerialAT.begin(19200);
+  Serial.println("GSM start");
 
+  // Restart takes quite some time
+  // To skip it, call init() instead of restart()
+  Serial.println("Initializing modem...");
+  // modem.restart();
+  modem.init();
+
+  String modemInfo = modem.getModemInfo();
+  Serial.print("Modem: ");
+  Serial.println(modemInfo);
+  
   lcd.begin();
   lcd.backlight();//Beleuchtung des Displays einschalten
   startMillis = millis();
@@ -199,7 +245,60 @@ void step4() {
       "NICHT ABHEBEN!      ", 4);  
     refreshDisplay = false;
   }
-  // TODO: GSM anruf starten
+
+  Serial.print("Waiting for network...");
+  if (!modem.waitForNetwork()) {
+    Serial.println(" fail");
+    delay(10000);
+    return;
+  }
+  Serial.println(" OK");
+
+  if (modem.isNetworkConnected()) {
+    Serial.println("Network connected");
+  }
+
+    Serial.print(F("Connecting to "));
+    Serial.print(apn);
+    if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+      Serial.println(" fail");
+      delay(10000);
+      return;
+    }
+    Serial.println(" OK");
+
+  Serial.print(F("Performing HTTP GET request... "));
+  int err = http.get(resource);
+  if (err != 0) {
+    Serial.println(F("failed to connect"));
+    delay(10000);
+    return;
+  }
+
+  int status = http.responseStatusCode();
+  Serial.print(F("Response status code: "));
+  Serial.println(status);
+  if (!status) {
+    delay(10000);
+    return;
+  }
+
+  String body = http.responseBody();
+  Serial.println(F("Response:"));
+  Serial.println(body);
+
+  Serial.print(F("Body length is: "));
+  Serial.println(body.length());
+
+  expected = body;
+  
+  // Shutdown
+
+  http.stop();
+  Serial.println(F("Server disconnected"));
+
+  modem.gprsDisconnect();
+  Serial.println(F("GPRS disconnected"));
 
     unsigned long currentMillis = millis();
     int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
