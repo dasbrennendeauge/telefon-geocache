@@ -81,8 +81,8 @@ const char gprsPass[] = "sipgate";
 
 // Server details
 const char server[] = "dev.rotmanov.de";
-const char resource[] = "/?number=491787777948";
-const int  port = 9992;
+String url = String("/?number=");
+const int port = 9992;
 
 #include <TinyGsmClient.h>
 #include <ArduinoHttpClient.h>
@@ -95,8 +95,8 @@ unsigned long startMillis;
 unsigned long stepStartMillis;
 int step = 0;
 bool refreshDisplay = false;
-char number[20] = "";
-int numberCounter = 0;
+
+String phoneNumber = String("");
 
 String expected = String("4711"); // TODO: ersetze mit angerufener Nummer
 String pin = String("");
@@ -110,21 +110,6 @@ void setup() {
   mp3.setVolume(15);
   
   // -> Arduino start -> GSM start
- 
-  // Set GSM module baud rate
-  SerialAT.begin(19200);
-  Serial.println("GSM start");
-
-  // Restart takes quite some time
-  // To skip it, call init() instead of restart()
-  Serial.println("Initializing modem...");
-  // modem.restart();
-  modem.init();
-
-  String modemInfo = modem.getModemInfo();
-  Serial.print("Modem: ");
-  Serial.println(modemInfo);
-  
   lcd.begin();
   lcd.backlight();//Beleuchtung des Displays einschalten
   startMillis = millis();
@@ -180,6 +165,21 @@ void step1() {
       "Hoerer ans Ohr!     ",
       "                    ", 1);
     refreshDisplay = false;
+
+     
+  // Set GSM module baud rate
+  SerialAT.begin(19200);
+  Serial.println("GSM start");
+
+  // Restart takes quite some time
+  // To skip it, call init() instead of restart()
+  Serial.println("Initializing modem...");
+  // modem.restart();
+  modem.init();
+
+  String modemInfo = modem.getModemInfo();
+  Serial.print("Modem: ");
+  Serial.println(modemInfo);
   }
 
     unsigned long currentMillis = millis();
@@ -196,7 +196,7 @@ void step2() {
     lcd.clear();
     showTextAndPlayMp3(
       "Deine Handynummer:  ",
-      number,
+      phoneNumber.c_str(),
       "Ende mit Leertaste  ", 2);  
     refreshDisplay = false;
   }
@@ -205,13 +205,12 @@ void step2() {
   if(key) {
     if(key == '#') {
       step = 3;
+      url.concat(phoneNumber);
       mp3.playMp3FolderTrack(3);
       refreshDisplay = true;
       return;
     }
-    number[numberCounter] = key;
-    numberCounter++;
-    Serial.println(key);
+    phoneNumber.concat(key);
     refreshDisplay = true;
   }
 }
@@ -243,70 +242,65 @@ void step4() {
       "Danke.              ",
       "Ich rufe dich an.   ",
       "NICHT ABHEBEN!      ", 4);  
-    refreshDisplay = false;
-  }
 
-  Serial.print("Waiting for network...");
-  if (!modem.waitForNetwork()) {
-    Serial.println(" fail");
-    delay(10000);
-    return;
-  }
-  Serial.println(" OK");
+      Serial.print("Waiting for network...");
+      if (!modem.waitForNetwork()) {
+        Serial.println(" fail");
+        delay(10000);
+        return;
+      }
+      Serial.println(" OK");
+    
+      if (modem.isNetworkConnected()) {
+        Serial.println("Network connected");
+      }
+    
+        Serial.print(F("Connecting to "));
+        Serial.print(apn);
+        if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+          Serial.println(" fail");
+          delay(10000);
+          return;
+        }
+        Serial.println(" OK");
+    
+      Serial.print(F("Performing HTTP GET request... "));
+      Serial.print(url);
+      int err = http.get(url);
+      if (err != 0) {
+        Serial.println(F("failed to connect"));
+        delay(10000);
+        return;
+      }
+    
+      int status = http.responseStatusCode();
+      Serial.print(F("Response status code: "));
+      Serial.println(status);
+      if (!status) {
+        delay(10000);
+        return;
+      }
+    
+      String body = http.responseBody();
+      Serial.println(F("Response:"));
+      Serial.println(body);
+    
+      Serial.print(F("Body length is: "));
+      Serial.println(body.length());
+    
+      expected = body;
+    
+      // Shutdown
+      http.stop();
+      Serial.println(F("Server disconnected"));
+    
+      modem.gprsDisconnect();
+      Serial.println(F("GPRS disconnected"));
 
-  if (modem.isNetworkConnected()) {
-    Serial.println("Network connected");
-  }
-
-    Serial.print(F("Connecting to "));
-    Serial.print(apn);
-    if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
-      Serial.println(" fail");
-      delay(10000);
-      return;
-    }
-    Serial.println(" OK");
-
-  Serial.print(F("Performing HTTP GET request... "));
-  int err = http.get(resource);
-  if (err != 0) {
-    Serial.println(F("failed to connect"));
-    delay(10000);
-    return;
-  }
-
-  int status = http.responseStatusCode();
-  Serial.print(F("Response status code: "));
-  Serial.println(status);
-  if (!status) {
-    delay(10000);
-    return;
-  }
-
-  String body = http.responseBody();
-  Serial.println(F("Response:"));
-  Serial.println(body);
-
-  Serial.print(F("Body length is: "));
-  Serial.println(body.length());
-
-  expected = body;
-  
-  // Shutdown
-
-  http.stop();
-  Serial.println(F("Server disconnected"));
-
-  modem.gprsDisconnect();
-  Serial.println(F("GPRS disconnected"));
-
-    unsigned long currentMillis = millis();
-    int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
-    if(secondsElapsed > 5) {
       step = 5;
       mp3.playMp3FolderTrack(5);
       refreshDisplay = true;
-    }
+  }
 }
 
 void step5() {
@@ -322,7 +316,6 @@ void step5() {
   char key = kpd.getKey();
   if(key) {
     pin.concat(key);
-    Serial.println(key);
     if(pin.length() == 4) {
       step = 6;
       mp3.playMp3FolderTrack(6);      
