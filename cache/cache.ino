@@ -7,6 +7,7 @@
 // GSM Calls: https://www.activexperts.com/serial-port-component/tutorials/gsmdial/
 
 #define TIME_TO_LIVE 300
+#define RELAIS_PIN 10
 
 const byte ROWS = 4; // Four rows
 const byte COLS = 3; // Three columns
@@ -104,6 +105,9 @@ String pin = String("");
 void setup() {
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle Schnittstelle
   Serial.println("Arduino start");
+
+  pinMode(RELAIS_PIN, OUTPUT);
+  digitalWrite(RELAIS_PIN, HIGH); //An dieser Stelle würde das Relais einsschalten
 
   // DFPlayer Mini initialisieren
   mp3.begin();
@@ -220,7 +224,8 @@ void step3() {
     showTextAndPlayMp3(
       "Münze einwerfen     ",
       "                    ",
-      "(Keine Rueckgabe)   ", 3);  
+      "(Keine Rueckgabe)   ", 3);
+  
     refreshDisplay = false;
   }
 
@@ -242,7 +247,7 @@ void step4() {
       "Danke.              ",
       "Ich rufe dich an.   ",
       "NICHT ABHEBEN!      ", 4);  
-
+  
       Serial.print("Waiting for network...");
       if (!modem.waitForNetwork()) {
         Serial.println(" fail");
@@ -254,16 +259,16 @@ void step4() {
       if (modem.isNetworkConnected()) {
         Serial.println("Network connected");
       }
-    
-        Serial.print(F("Connecting to "));
-        Serial.print(apn);
-        if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
-          Serial.println(" fail");
-          delay(10000);
-          return;
-        }
-        Serial.println(" OK");
-    
+  
+      Serial.print(F("Connecting to "));
+      Serial.print(apn);
+      if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+        Serial.println(" fail");
+        delay(10000);
+        return;
+      }
+      Serial.println(" OK");
+              
       Serial.print(F("Performing HTTP GET request... "));
       Serial.print(url);
       int err = http.get(url);
@@ -330,7 +335,11 @@ void step6() {
   if(refreshDisplay == true) {
     lcd.clear();
     if(pin == expected) {
-      // TODO: Klappe oeffnen
+
+      digitalWrite(RELAIS_PIN, LOW); //An dieser Stelle würde das Relais einsschalten
+      delay(500);//...eine Sekunde warten
+      digitalWrite(RELAIS_PIN, HIGH); //Und wieder ausschalten
+
       showTextAndPlayMp3(
         "Geschafft.          ",
         "Trag dich ein, dann ",
