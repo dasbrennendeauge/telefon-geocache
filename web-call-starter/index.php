@@ -1,4 +1,6 @@
 <?php
+include_once('vendor/autoload.php');
+
 $credentials = getenv('SIPGATE_CREDENTIALS');
 if(empty($credentials)) {
   die('no credentials defined');
@@ -8,8 +10,16 @@ $code = str_pad(rand(0, 9999), 4, '0', STR_PAD_LEFT);
 
 makeRequest('/devices/y6/callerid', 'PUT', array('value' => '+491579999'.$code));
 
-if($_GET['number']) {
-  $sessionId = startCall($_GET['number'], '+491579999' . $code);
+$number = $_GET['number'];
+
+if(isset($number)) {
+  $phoneUtil = \libphonenumber\PhoneNumberUtil::getInstance();
+  $numberProto = $phoneUtil->parse($number, "DE");
+  if($numberProto->countryCode !== 49) {
+    die('EINT');
+  }
+  $e164 = $phoneUtil->format($numberProto, \libphonenumber\PhoneNumberFormat::E164);
+  $sessionId = startCall($e164, '+491579999' . $code);
   sleep(5);
   hangupCall($sessionId);
 }
@@ -20,7 +30,7 @@ echo $code;
 function startCall($caller, $callee) {
   $payload = array(
     'deviceId' => 'y6',
-    'caller' => '+' . $caller,
+    'caller' => $caller,
     'callee' => $callee,
     'callerId' => $callee,
   );
