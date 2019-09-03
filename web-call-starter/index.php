@@ -15,7 +15,7 @@ $number = $_GET['number'];
 if(isset($number)) {
   $phoneUtil = \libphonenumber\PhoneNumberUtil::getInstance();
   $numberProto = $phoneUtil->parse($number, "DE");
-  if($numberProto->countryCode !== 49) {
+  if($numberProto->getCountryCode() !== 49) {
     die('EINT');
   }
   $e164 = $phoneUtil->format($numberProto, \libphonenumber\PhoneNumberFormat::E164);
