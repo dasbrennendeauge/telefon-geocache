@@ -37,12 +37,12 @@ Hörer abheben
 [![](http://img.youtube.com/vi/i5rzEiwlTfw/0.jpg)](http://www.youtube.com/watch?v=i5rzEiwlTfw "")
 
 ### Benötigte Elektronik:
-- Arduino 
-- MP3-Player (2)
-- RTC	(2)
+- Arduino Mega
+- MP3-Player DFPlayerMini (2)
 - Display	(2)
-- GSM-Modul	(3)
-- Tastatur	(7)
+- Step Up Modul
+- GSM-Modul	SIM800L (3)
+- Keypad	(7)
 - Lichtschranke (1)
-- Relais	(1)
+- Relais SRD-05VDC-SL-C	(1)
 - (Lautsprecher)
