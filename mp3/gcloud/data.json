@@ -1,0 +1,18 @@
+{
+  "audioConfig": {
+    "audioEncoding": "MP3",
+    "effectsProfileId": [
+      "small-bluetooth-speaker-class-device"
+    ],
+    "pitch": 0,
+    "speakingRate": 1
+  },
+  "input": {
+    "text": "Sorry, aber die eingegebene PIN ist nicht korrekt. Leg bitte auf und versuch es nochmal."
+  },
+  "voice": {
+    "languageCode": "de-DE",
+    "name": "de-DE-Wavenet-B",
+    "ssmlGender": "FEMALE"
+  }
+}
