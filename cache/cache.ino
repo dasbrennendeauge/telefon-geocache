@@ -163,9 +163,9 @@ void loop() {
 void step0() {
   if (refreshDisplay == true) {
     showTextAndPlayMp3(
+      "H\xEFrer ans Ohr!      ",
       "                    ",
-      "Hoerer ans Ohr!     ",
-      "                    ", 1);
+      "Dr""\xF5""cke dann Taste 5 ", 1);
     refreshDisplay = false;
 
     // Set GSM module baud rate
@@ -186,9 +186,14 @@ void step0() {
       modem.simUnlock(GSM_PIN);
     }
   }
+
+  /*
   unsigned long currentMillis = millis();
   int secondsElapsed = (currentMillis - startMillis) / 1000;
   if (secondsElapsed > 2) {
+  */
+  char key = kpd.getKey();
+  if (key) {
     step = 1;
     mp3.playMp3FolderTrack(1);
     stepStartMillis = millis();
@@ -200,7 +205,7 @@ void step1() {
   if (refreshDisplay == true) {
     showTextAndPlayMp3(
       "Willkommen!         ",
-      "Hoerer ans Ohr!     ",
+      "Deine Zeit l\xE1uft... ",
       "                    ", 1);
     refreshDisplay = false;
 
@@ -275,9 +280,9 @@ void step2() {
 void step3() {
   if (refreshDisplay == true) {
     showTextAndPlayMp3(
-      "Münze einwerfen     ",
+      "M\xF5nze einwerfen     ",
       "                    ",
-      "(Keine Rueckgabe)   ", 3);
+      "(Keine R""\xF5""ckgabe)    ", 3);
 
     refreshDisplay = false;
   }
