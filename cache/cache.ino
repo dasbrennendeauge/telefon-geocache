@@ -8,24 +8,28 @@
 
 #define TIME_TO_LIVE 300
 #define RELAIS_PIN 10
+#define TINY_GSM_DEBUG Serial
 
 const byte ROWS = 4; // Four rows
 const byte COLS = 3; // Three columns
 // Define the Keymap
 char keys[ROWS][COLS] = {
-  {'1','2','3'},
-  {'4','5','6'},
-  {'7','8','9'},
-  {'#','0','*'}
+  {'1', '2', '3'},
+  {'4', '5', '6'},
+  {'7', '8', '9'},
+  {'#', '0', '*'}
 };
 // Connect keypad ROW0, ROW1, ROW2 and ROW3 to these Arduino pins.
 byte rowPins[ROWS] = { 34, 35, 36, 37 };
 // Connect keypad COL0, COL1 and COL2 to these Arduino pins.
-byte colPins[COLS] = { 31, 32, 33 }; 
+byte colPins[COLS] = { 31, 32, 33 };
 // Create the Keypad
 Keypad kpd = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
 
-const int analogInPin = A8;  // Data Muenzeinwurf
+const int analogInPin = A13;  // Data Muenzeinwurf
+
+// set GSM PIN, if any
+#define GSM_PIN "1234"
 
 // DFPlayer Mini
 SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
@@ -33,28 +37,37 @@ SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
 // its member methods will get called
 //
 class Mp3Notify {
-public:
-  static void OnError(uint16_t errorCode) {
-    // see DfMp3_Error for code meaning
-    Serial.println();
-    Serial.print("Com Error ");
-    Serial.println(errorCode);
-  }
-  static void OnPlayFinished(uint16_t track) {
-    Serial.print("Track beendet ");
-    Serial.println(track);
-    delay(100);
-    // TODO: nächsten Schritt aufrufen
-  }
-  static void OnCardOnline(uint16_t code) {
-    Serial.println(F("SD Karte online "));
-  }
-  static void OnCardInserted(uint16_t code) {
-    Serial.println(F("SD Karte bereit "));
-  }
-  static void OnCardRemoved(uint16_t code) {
-    Serial.println(F("SD Karte entfernt "));
-  }
+  public:
+    static void OnError(uint16_t errorCode) {
+      // see DfMp3_Error for code meaning
+      Serial.println();
+      Serial.print("Com Error ");
+      Serial.println(errorCode);
+    }
+    static void OnPlayFinished(uint16_t track) {
+      Serial.print("Track beendet ");
+      Serial.println(track);
+      delay(100);
+      // TODO: nächsten Schritt aufrufen
+    }
+    static void OnCardOnline(uint16_t code) {
+      Serial.println(F("SD Karte online "));
+    }
+    static void OnCardInserted(uint16_t code) {
+      Serial.println(F("SD Karte bereit "));
+    }
+    static void OnCardRemoved(uint16_t code) {
+      Serial.println(F("SD Karte entfernt "));
+    }
+    static void OnUsbOnline(uint16_t code) {
+      Serial.println(F("USB online "));
+    }
+    static void OnUsbInserted(uint16_t code) {
+      Serial.println(F("USB bereit "));
+    }
+    static void OnUsbRemoved(uint16_t code) {
+      Serial.println(F("USB entfernt "));
+    }
 };
 static DFMiniMp3<HardwareSerial, Mp3Notify> mp3(Serial3);
 
@@ -96,6 +109,7 @@ unsigned long startMillis;
 unsigned long stepStartMillis;
 int step = 0;
 bool refreshDisplay = false;
+bool outOfOrder = false;
 
 String phoneNumber = String("");
 
@@ -112,7 +126,7 @@ void setup() {
   // DFPlayer Mini initialisieren
   mp3.begin();
   mp3.setVolume(15);
-  
+
   // -> Arduino start -> GSM start
   lcd.begin();
   lcd.backlight();//Beleuchtung des Displays einschalten
@@ -126,35 +140,55 @@ void setup() {
 
 void loop() {
   mp3.loop();
-  if(step == 0) {
+  if (step == 0) {
     step0();
-  } else if(step == 1) {
+  } else if (step == 1) {
     step1();
-  } else if(step == 2) {
+  } else if (step == 2) {
     step2();
-  } else if(step == 3) {
+  } else if (step == 3) {
     step3();
-  } else if(step == 4) {
+  } else if (step == 4) {
     step4();
-  } else if(step == 5) {
+  } else if (step == 5) {
     step5();
-  } else if(step == 6) {
+  } else if (step == 6) {
     step6();
+  } else if (step == 7) {
+    step7();
   }
   decreaseTimer();
 }
 
 void step0() {
-  if(refreshDisplay == true) {
+  if (refreshDisplay == true) {
     showTextAndPlayMp3(
       "                    ",
       "Hoerer ans Ohr!     ",
       "                    ", 1);
     refreshDisplay = false;
+
+    // Set GSM module baud rate
+    SerialAT.begin(19200);
+    Serial.println("GSM start");
+
+    // Restart takes quite some time
+    // To skip it, call init() instead of restart()
+    Serial.println("Initializing modem...");
+    // modem.restart();
+    modem.init();
+
+    String modemInfo = modem.getModemInfo();
+    Serial.print("Modem: ");
+    Serial.println(modemInfo);
+
+    if ( GSM_PIN && modem.getSimStatus() != 3 ) {
+      modem.simUnlock(GSM_PIN);
+    }
   }
   unsigned long currentMillis = millis();
   int secondsElapsed = (currentMillis - startMillis) / 1000;
-  if(secondsElapsed > 2) {
+  if (secondsElapsed > 2) {
     step = 1;
     mp3.playMp3FolderTrack(1);
     stepStartMillis = millis();
@@ -163,51 +197,70 @@ void step0() {
 }
 
 void step1() {
-  if(refreshDisplay == true) {
+  if (refreshDisplay == true) {
     showTextAndPlayMp3(
       "Willkommen!         ",
       "Hoerer ans Ohr!     ",
       "                    ", 1);
     refreshDisplay = false;
 
-     
-  // Set GSM module baud rate
-  SerialAT.begin(19200);
-  Serial.println("GSM start");
+  unsigned long startMillis = millis();
+    Serial.println("Waiting for network...");
 
-  // Restart takes quite some time
-  // To skip it, call init() instead of restart()
-  Serial.println("Initializing modem...");
-  // modem.restart();
-  modem.init();
+    modem.waitForNetwork();
+    if (modem.isNetworkConnected()) {
+      unsigned long currentMillis = millis();
+      int secondsElapsed = (currentMillis - startMillis) / 1000;
+      Serial.print("Network connected");
+      Serial.println(secondsElapsed);
+    }
 
-  String modemInfo = modem.getModemInfo();
-  Serial.print("Modem: ");
-  Serial.println(modemInfo);
+    delay(500);
+    
+    String gsmTime = modem.getGSMDateTime(DATE_TIME);
+    Serial.print("GSM Time:");
+    Serial.println(gsmTime);
+    String hour = gsmTime.substring(0, 2);
+    Serial.println(hour);
+    int hourI = hour.toInt();
+    if(hourI > 21) {
+      outOfOrder = true;
+    }
+    if(hourI < 8) {
+      outOfOrder = true;
+    }
+    // String gsmDate = modem.getGSMDateTime(DATE_DATE);
+    // Serial.print("GSM Date:");
+    // Serial.println(gsmDate);
   }
 
-    unsigned long currentMillis = millis();
-    int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
-    if(secondsElapsed > 6) {
-      step = 2;
+  unsigned long currentMillis = millis();
+  int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
+  if (secondsElapsed > 6) {
+    if(outOfOrder) {
+      stepStartMillis = millis();
+      step = 7;
+    } else {
+      step = 2;      
       mp3.playMp3FolderTrack(2);
-      refreshDisplay = true;
     }
+    refreshDisplay = true;
+  }
 }
 
 void step2() {
-  if(refreshDisplay == true) {
+  if (refreshDisplay == true) {
     lcd.clear();
     showTextAndPlayMp3(
       "Deine Handynummer:  ",
       phoneNumber.c_str(),
-      "Ende mit Leertaste  ", 2);  
+      "Ende mit Leertaste  ", 2);
     refreshDisplay = false;
   }
 
   char key = kpd.getKey();
-  if(key) {
-    if(key == '#') {
+  if (key) {
+    if (key == '#') {
       step = 3;
       url.concat(phoneNumber);
       mp3.playMp3FolderTrack(3);
@@ -220,12 +273,12 @@ void step2() {
 }
 
 void step3() {
-  if(refreshDisplay == true) {
+  if (refreshDisplay == true) {
     showTextAndPlayMp3(
       "Münze einwerfen     ",
       "                    ",
       "(Keine Rueckgabe)   ", 3);
-  
+
     refreshDisplay = false;
   }
 
@@ -236,94 +289,94 @@ void step3() {
     step = 4;
     mp3.playMp3FolderTrack(4);
     stepStartMillis = millis();
-    refreshDisplay = true;    
+    refreshDisplay = true;
     Serial.println("Pling!");
   }
 }
 
 void step4() {
-  if(refreshDisplay == true) {
+  if (refreshDisplay == true) {
     showTextAndPlayMp3(
       "Danke.              ",
       "Ich rufe dich an.   ",
-      "NICHT ABHEBEN!      ", 4);  
-  
-      Serial.print("Waiting for network...");
-      if (!modem.waitForNetwork()) {
-        Serial.println(" fail");
-        delay(10000);
-        return;
-      }
-      Serial.println(" OK");
-    
-      if (modem.isNetworkConnected()) {
-        Serial.println("Network connected");
-      }
-  
-      Serial.print(F("Connecting to "));
-      Serial.print(apn);
-      if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
-        Serial.println(" fail");
-        delay(10000);
-        return;
-      }
-      Serial.println(" OK");
-              
-      Serial.print(F("Performing HTTP GET request... "));
-      Serial.print(url);
-      int err = http.get(url);
-      if (err != 0) {
-        Serial.println(F("failed to connect"));
-        delay(10000);
-        return;
-      }
-    
-      int status = http.responseStatusCode();
-      Serial.print(F("Response status code: "));
-      Serial.println(status);
-      if (!status) {
-        delay(10000);
-        return;
-      }
-    
-      String body = http.responseBody();
-      Serial.println(F("Response:"));
-      Serial.println(body);
-    
-      Serial.print(F("Body length is: "));
-      Serial.println(body.length());
-    
-      expected = body;
-    
-      // Shutdown
-      http.stop();
-      Serial.println(F("Server disconnected"));
-    
-      modem.gprsDisconnect();
-      Serial.println(F("GPRS disconnected"));
+      "NICHT ABHEBEN!      ", 4);
 
-      step = 5;
-      mp3.playMp3FolderTrack(5);
-      refreshDisplay = true;
+    Serial.print("Waiting for network...");
+    if (!modem.waitForNetwork()) {
+      Serial.println(" fail");
+      delay(10000);
+      return;
+    }
+    Serial.println(" OK");
+
+    if (modem.isNetworkConnected()) {
+      Serial.println("Network connected");
+    }
+
+    Serial.print(F("Connecting to "));
+    Serial.print(apn);
+    if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
+      Serial.println(" fail");
+      delay(10000);
+      return;
+    }
+    Serial.println(" OK");
+
+    Serial.print(F("Performing HTTP GET request... "));
+    Serial.print(url);
+    int err = http.get(url);
+    if (err != 0) {
+      Serial.println(F("failed to connect"));
+      delay(10000);
+      return;
+    }
+
+    int status = http.responseStatusCode();
+    Serial.print(F("Response status code: "));
+    Serial.println(status);
+    if (!status) {
+      delay(10000);
+      return;
+    }
+
+    String body = http.responseBody();
+    Serial.println(F("Response:"));
+    Serial.println(body);
+
+    Serial.print(F("Body length is: "));
+    Serial.println(body.length());
+
+    expected = body;
+
+    // Shutdown
+    http.stop();
+    Serial.println(F("Server disconnected"));
+
+    modem.gprsDisconnect();
+    Serial.println(F("GPRS disconnected"));
+
+    step = 5;
+    mp3.playMp3FolderTrack(5);
+    refreshDisplay = true;
   }
 }
 
 void step5() {
-  if(refreshDisplay == true) {
+  if (refreshDisplay == true) {
     lcd.clear();
     showTextAndPlayMp3(
       "Wer rief dich an?   ",
       "Gib letzte 4 Zahlen:",
-      pin.c_str(), 5);  
+      pin.c_str(), 5);
     refreshDisplay = false;
   }
 
   char key = kpd.getKey();
-  if(key) {
+  if (key) {
     pin.concat(key);
-    if(pin.length() == 4) {
+    if (pin.length() == 4) {
       step = 6;
-      mp3.playMp3FolderTrack(6);      
+      mp3.playMp3FolderTrack(6);
       refreshDisplay = true;
       return;
     }
@@ -332,9 +385,9 @@ void step5() {
 }
 
 void step6() {
-  if(refreshDisplay == true) {
+  if (refreshDisplay == true) {
     lcd.clear();
-    if(pin == expected) {
+    if (pin == expected) {
 
       digitalWrite(RELAIS_PIN, LOW); //An dieser Stelle würde das Relais einsschalten
       delay(500);//...eine Sekunde warten
@@ -346,20 +399,40 @@ void step6() {
         "Klappe zu.          ", 6);
     } else {
       showTextAndPlayMp3(
-        "Computer sagt:      ",
-        "NEIN                ",
-        "                    ", 6);
+        "PIN nicht korrekt :(",
+        "Auflegen &          ",
+        "neu versuchen       ", 8);
     }
     refreshDisplay = false;
   }
 }
 
+// ausserhalb oeffnungszeiten
+void step7() {
+  if (refreshDisplay == true) {
+    lcd.clear();
+      mp3.playMp3FolderTrack(7);
+      showTextAndPlayMp3(
+        "Cache-Zeit von      ",
+        "8 Uhr bis 22 Uhr    ",
+        "Sorry. :'-(         ", 7);
+    refreshDisplay = false;
+  }
+
+  unsigned long currentMillis = millis();
+  int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
+  if (secondsElapsed > 6) {
+    enterSleep();
+  }
+  
+}
+
 void showTextAndPlayMp3(char *line1, char *line2, char *line3, uint16_t track) {
-  lcd.setCursor(0,0); //Text soll beim ersten Zeichen in der ersten Reihe beginnen..
+  lcd.setCursor(0, 0); //Text soll beim ersten Zeichen in der ersten Reihe beginnen..
   lcd.print(line1); //In der ersten Zeile soll der Text „Test Zeile 1“ angezeigt werden
-  lcd.setCursor(0,1); //Genauso geht es bei den weiteren drei Zeilen weiter
+  lcd.setCursor(0, 1); //Genauso geht es bei den weiteren drei Zeilen weiter
   lcd.print(line2);
-  lcd.setCursor(0,2);
+  lcd.setCursor(0, 2);
   lcd.print(line3);
   Serial.println(line1);
   Serial.println(line2);
@@ -369,12 +442,12 @@ void showTextAndPlayMp3(char *line1, char *line2, char *line3, uint16_t track) {
 void decreaseTimer() {
   unsigned long currentMillis = millis();
   int secondsRemaining = TIME_TO_LIVE - ((currentMillis - startMillis) / 1000);
-  if(secondsRemaining <= 0) {
+  if (secondsRemaining <= 0) {
     enterSleep();
   }
   char line[20] = "";
   sprintf(line, "%3d Sekunden   ", secondsRemaining);
-  lcd.setCursor(0,3);
+  lcd.setCursor(0, 3);
   lcd.print(line);
 }
 
