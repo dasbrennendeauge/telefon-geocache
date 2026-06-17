@@ -29,7 +29,7 @@ Keypad kpd = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
 const int analogInPin = A13;  // Data Muenzeinwurf
 
 // set GSM PIN, if any
-#define GSM_PIN "1234"
+#define GSM_PIN "6348"
 
 // DFPlayer Mini
 SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
@@ -162,10 +162,10 @@ void loop() {
 
 void step0() {
   if (refreshDisplay == true) {
-    showTextAndPlayMp3(
+    showText(
       "H\xEFrer ans Ohr!      ",
       "                    ",
-      "Dr""\xF5""cke dann Taste 5 ", 1);
+      "Dr""\xF5""cke dann Taste 5 ");
     refreshDisplay = false;
 
     // Set GSM module baud rate
@@ -203,10 +203,10 @@ void step0() {
 
 void step1() {
   if (refreshDisplay == true) {
-    showTextAndPlayMp3(
+    showText(
       "Willkommen!         ",
       "Deine Zeit l\xE1uft... ",
-      "                    ", 1);
+      "                    ");
     refreshDisplay = false;
 
   unsigned long startMillis = millis();
@@ -256,10 +256,10 @@ void step1() {
 void step2() {
   if (refreshDisplay == true) {
     lcd.clear();
-    showTextAndPlayMp3(
+    showText(
       "Deine Handynummer:  ",
       phoneNumber.c_str(),
-      "Ende mit Leertaste  ", 2);
+      "Ende mit Leertaste  ");
     refreshDisplay = false;
   }
 
@@ -279,10 +279,10 @@ void step2() {
 
 void step3() {
   if (refreshDisplay == true) {
-    showTextAndPlayMp3(
+    showText(
       "M\xF5nze einwerfen     ",
       "                    ",
-      "(Keine R""\xF5""ckgabe)    ", 3);
+      "(Keine R""\xF5""ckgabe)    ");
 
     refreshDisplay = false;
   }
@@ -301,10 +301,10 @@ void step3() {
 
 void step4() {
   if (refreshDisplay == true) {
-    showTextAndPlayMp3(
+    showText(
       "Danke.              ",
       "Ich rufe dich an.   ",
-      "NICHT ABHEBEN!      ", 4);
+      "NICHT ABHEBEN!      ");
 
     Serial.print("Waiting for network...");
     if (!modem.waitForNetwork()) {
@@ -369,10 +369,10 @@ void step4() {
 void step5() {
   if (refreshDisplay == true) {
     lcd.clear();
-    showTextAndPlayMp3(
+    showText(
       "Wer rief dich an?   ",
       "Gib letzte 4 Zahlen:",
-      pin.c_str(), 5);
+      pin.c_str());
     refreshDisplay = false;
   }
 
@@ -381,7 +381,6 @@ void step5() {
     pin.concat(key);
     if (pin.length() == 4) {
       step = 6;
-      mp3.playMp3FolderTrack(6);
       refreshDisplay = true;
       return;
     }
@@ -398,15 +397,17 @@ void step6() {
       delay(500);//...eine Sekunde warten
       digitalWrite(RELAIS_PIN, HIGH); //Und wieder ausschalten
 
-      showTextAndPlayMp3(
+      mp3.playMp3FolderTrack(6);
+      showText(
         "Geschafft.          ",
         "Trag dich ein, dann ",
-        "Klappe zu.          ", 6);
+        "Klappe zu.          ");
     } else {
-      showTextAndPlayMp3(
+      mp3.playMp3FolderTrack(8);
+      showText(
         "PIN nicht korrekt :(",
         "Auflegen &          ",
-        "neu versuchen       ", 8);
+        "neu versuchen       ");
     }
     refreshDisplay = false;
   }
@@ -417,10 +418,10 @@ void step7() {
   if (refreshDisplay == true) {
     lcd.clear();
       mp3.playMp3FolderTrack(7);
-      showTextAndPlayMp3(
+      showText(
         "Cache-Zeit von      ",
         "8 Uhr bis 22 Uhr    ",
-        "Sorry. :'-(         ", 7);
+        "Sorry. :'-(         ");
     refreshDisplay = false;
   }
 
@@ -432,7 +433,7 @@ void step7() {
   
 }
 
-void showTextAndPlayMp3(char *line1, char *line2, char *line3, uint16_t track) {
+void showText(char *line1, char *line2, char *line3) {
   lcd.setCursor(0, 0); //Text soll beim ersten Zeichen in der ersten Reihe beginnen..
   lcd.print(line1); //In der ersten Zeile soll der Text „Test Zeile 1“ angezeigt werden
   lcd.setCursor(0, 1); //Genauso geht es bei den weiteren drei Zeilen weiter
