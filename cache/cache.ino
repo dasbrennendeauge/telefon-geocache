@@ -92,7 +92,8 @@ static DFMiniMp3<HardwareSerial, Mp3Notify> mp3(Serial3);
 // ---------------------------------------------------------------------------
 // LCD (20x4, I2C-Adresse 0x27)
 // ---------------------------------------------------------------------------
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+#define LCD_COLS 20
+LiquidCrystal_I2C lcd(0x27, LCD_COLS, 4);
 
 // ---------------------------------------------------------------------------
 // GSM / Netz (SIM800 ueber Serial1)
@@ -166,9 +167,9 @@ void loop() {
 void stepGreeting() {
   if (refreshDisplay) {
     showText(
-      "H\xEFrer ans Ohr!      ",
-      "                    ",
-      "Dr""\xF5""cke dann Taste 5 ");
+      "H\xEFrer ans Ohr!",
+      "",
+      "Dr""\xF5""cke dann Taste 5");
     refreshDisplay = false;
 
     SerialAT.begin(19200);
@@ -199,9 +200,9 @@ void stepGreeting() {
 void stepWelcome() {
   if (refreshDisplay) {
     showText(
-      "Willkommen!         ",
-      "Deine Zeit l\xE1uft... ",
-      "                    ");
+      "Willkommen!",
+      "Deine Zeit l\xE1uft...",
+      "");
     refreshDisplay = false;
 
     unsigned long netStart = millis();
@@ -244,9 +245,9 @@ void stepEnterNumber() {
   if (refreshDisplay) {
     lcd.clear();
     showText(
-      "Deine Handynummer:  ",
+      "Deine Handynummer:",
       phoneNumber.c_str(),
-      "Ende mit Leertaste  ");
+      "Ende mit Leertaste");
     refreshDisplay = false;
   }
 
@@ -268,9 +269,9 @@ void stepEnterNumber() {
 void stepInsertCoin() {
   if (refreshDisplay) {
     showText(
-      "M\xF5nze einwerfen     ",
-      "                    ",
-      "(Keine R""\xF5""ckgabe)    ");
+      "M\xF5nze einwerfen",
+      "",
+      "(Keine R""\xF5""ckgabe)");
     refreshDisplay = false;
   }
 
@@ -288,9 +289,9 @@ void stepInsertCoin() {
 void stepCall() {
   if (refreshDisplay) {
     showText(
-      "Danke.              ",
-      "Ich rufe dich an.   ",
-      "NICHT ABHEBEN!      ");
+      "Danke.",
+      "Ich rufe dich an.",
+      "NICHT ABHEBEN!");
 
     Serial.print("Waiting for network...");
     if (!modem.waitForNetwork()) {
@@ -365,7 +366,7 @@ void stepEnterPin() {
   if (refreshDisplay) {
     lcd.clear();
     showText(
-      "Wer rief dich an?   ",
+      "Wer rief dich an?",
       "Gib letzte 4 Zahlen:",
       pin.c_str());
     refreshDisplay = false;
@@ -394,15 +395,15 @@ void stepResult() {
 
       mp3.playMp3FolderTrack(TRACK_SUCCESS);
       showText(
-        "Geschafft.          ",
-        "Trag dich ein, dann ",
-        "Klappe zu.          ");
+        "Geschafft.",
+        "Trag dich ein, dann",
+        "Klappe zu.");
     } else {
       mp3.playMp3FolderTrack(TRACK_WRONG_PIN);
       showText(
         "PIN nicht korrekt :(",
-        "Auflegen &          ",
-        "neu versuchen       ");
+        "Auflegen &",
+        "neu versuchen");
     }
     refreshDisplay = false;
   }
@@ -414,9 +415,9 @@ void stepClosed() {
     lcd.clear();
     mp3.playMp3FolderTrack(TRACK_CLOSED);
     showText(
-      "Cache-Zeit von      ",
-      "8 Uhr bis 22 Uhr    ",
-      "Sorry. :'-(         ");
+      "Cache-Zeit von",
+      "8 Uhr bis 22 Uhr",
+      "Sorry. :'-(");
     refreshDisplay = false;
   }
 
@@ -430,15 +431,27 @@ void stepClosed() {
 // Hilfsfunktionen
 // ---------------------------------------------------------------------------
 void showText(const char *line1, const char *line2, const char *line3) {
-  lcd.setCursor(0, 0);
-  lcd.print(line1);
-  lcd.setCursor(0, 1);
-  lcd.print(line2);
-  lcd.setCursor(0, 2);
-  lcd.print(line3);
+  printLcdLine(0, line1);
+  printLcdLine(1, line2);
+  printLcdLine(2, line3);
   Serial.println(line1);
   Serial.println(line2);
   Serial.println(line3);
+}
+
+// Schreibt eine Zeile linksbuendig in die angegebene Zeile und fuellt mit
+// Leerzeichen auf LCD_COLS auf bzw. kuerzt zu lange Texte.
+void printLcdLine(uint8_t row, const char *text) {
+  lcd.setCursor(0, row);
+  uint8_t i = 0;
+  while (i < LCD_COLS && text[i] != '\0') {
+    lcd.write(text[i]);
+    i++;
+  }
+  while (i < LCD_COLS) {
+    lcd.write(' ');
+    i++;
+  }
 }
 
 void decreaseTimer() {
