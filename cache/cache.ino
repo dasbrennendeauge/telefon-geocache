@@ -360,6 +360,15 @@ void step4() {
     modem.gprsDisconnect();
     Serial.println(F("GPRS disconnected"));
 
+    // Nutzer anrufen, damit sein Telefon mit der vom Server gesetzten
+    // Absender-Rufnummer (+491579999<code>) klingelt. NICHT abheben.
+    Serial.print(F("Calling "));
+    Serial.println(phoneNumber);
+    modem.callNumber(phoneNumber);
+    delay(5000);
+    modem.callHangup();
+    Serial.println(F("Call hung up"));
+
     step = 5;
     mp3.playMp3FolderTrack(5);
     refreshDisplay = true;
