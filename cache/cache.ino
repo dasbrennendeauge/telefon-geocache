@@ -1,45 +1,76 @@
 #include <avr/sleep.h>
 #include <LiquidCrystal_I2C.h>
 #include <DFMiniMp3.h>
-#include <SoftwareSerial.h>
 #include <Keypad.h>
 
 // GSM Calls: https://www.activexperts.com/serial-port-component/tutorials/gsmdial/
 
-#define TIME_TO_LIVE 300
+// ---------------------------------------------------------------------------
+// Konfiguration
+// ---------------------------------------------------------------------------
 #define RELAIS_PIN 10
 #define TINY_GSM_DEBUG Serial
 
-const byte ROWS = 4; // Four rows
-const byte COLS = 3; // Three columns
-// Define the Keymap
+#define GSM_PIN "6348"        // PIN der SIM-Karte
+
+// Zeiten
+#define TIME_TO_LIVE       300   // Gesamt-Timeout einer Session in Sekunden
+#define STEP_HOLD_SECONDS    6   // Anzeige-/Ansagedauer (Begruessung, "geschlossen")
+#define CALL_RING_MS      5000   // Klingeldauer beim Rueckruf
+#define RETRY_DELAY_MS   10000   // Wartezeit nach Netz-/Verbindungsfehler
+#define RELAY_PULSE_MS     500   // Relais-Impuls zum Oeffnen der Klappe
+#define MP3_VOLUME          15
+
+// Oeffnungszeiten (Stunde, einschliesslich)
+#define OPEN_FROM_HOUR  8
+#define OPEN_TO_HOUR    21
+
+// MP3-Tracks auf der SD-Karte (Ordner 1)
+#define TRACK_WELCOME       1   // Begruessung
+#define TRACK_ENTER_NUMBER  2   // Handynummer eingeben
+#define TRACK_INSERT_COIN   3   // Muenze einwerfen
+#define TRACK_THANKS        4   // Danke / Rueckruf laeuft
+#define TRACK_ENTER_PIN     5   // PIN eingeben
+#define TRACK_SUCCESS       6   // geschafft
+#define TRACK_CLOSED        7   // ausserhalb der Oeffnungszeiten
+#define TRACK_WRONG_PIN     8   // PIN falsch
+
+// Schritte der Zustandsmaschine
+enum Step {
+  STEP_GREETING,      // Hoerer ans Ohr, Taste 5
+  STEP_WELCOME,       // Begruessung, Netz & Uhrzeit pruefen
+  STEP_ENTER_NUMBER,  // Handynummer eingeben
+  STEP_INSERT_COIN,   // Muenze einwerfen
+  STEP_CALL,          // Server abfragen + zurueckrufen
+  STEP_ENTER_PIN,     // letzte 4 Ziffern eingeben
+  STEP_RESULT,        // Ergebnis (Klappe auf / falsch)
+  STEP_CLOSED         // ausserhalb der Oeffnungszeiten
+};
+
+// ---------------------------------------------------------------------------
+// Tastenfeld (3x4-Matrix)
+// ---------------------------------------------------------------------------
+const byte ROWS = 4;
+const byte COLS = 3;
 char keys[ROWS][COLS] = {
   {'1', '2', '3'},
   {'4', '5', '6'},
   {'7', '8', '9'},
   {'#', '0', '*'}
 };
-// Connect keypad ROW0, ROW1, ROW2 and ROW3 to these Arduino pins.
-byte rowPins[ROWS] = { 34, 35, 36, 37 };
-// Connect keypad COL0, COL1 and COL2 to these Arduino pins.
-byte colPins[COLS] = { 31, 32, 33 };
-// Create the Keypad
+byte rowPins[ROWS] = { 34, 35, 36, 37 };  // ROW0..ROW3
+byte colPins[COLS] = { 31, 32, 33 };      // COL0..COL2
 Keypad kpd = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
 
-const int analogInPin = A13;  // Data Muenzeinwurf
+const int analogInPin = A13;  // Muenzeinwurf (Lichtschranke)
 
-// set GSM PIN, if any
-#define GSM_PIN "6348"
-
-// DFPlayer Mini
-SoftwareSerial mySoftwareSerial(2, 3); // RX, TX
-// implement a notification class,
-// its member methods will get called
-//
+// ---------------------------------------------------------------------------
+// DFPlayer Mini (MP3) ueber Serial3
+// ---------------------------------------------------------------------------
 class Mp3Notify {
   public:
     static void OnError(uint16_t errorCode) {
-      // see DfMp3_Error for code meaning
+      // siehe DfMp3_Error fuer die Bedeutung
       Serial.println();
       Serial.print("Com Error ");
       Serial.println(errorCode);
@@ -48,55 +79,37 @@ class Mp3Notify {
       Serial.print("Track beendet ");
       Serial.println(track);
       delay(100);
-      // TODO: nächsten Schritt aufrufen
     }
-    static void OnCardOnline(uint16_t code) {
-      Serial.println(F("SD Karte online "));
-    }
-    static void OnCardInserted(uint16_t code) {
-      Serial.println(F("SD Karte bereit "));
-    }
-    static void OnCardRemoved(uint16_t code) {
-      Serial.println(F("SD Karte entfernt "));
-    }
-    static void OnUsbOnline(uint16_t code) {
-      Serial.println(F("USB online "));
-    }
-    static void OnUsbInserted(uint16_t code) {
-      Serial.println(F("USB bereit "));
-    }
-    static void OnUsbRemoved(uint16_t code) {
-      Serial.println(F("USB entfernt "));
-    }
+    static void OnCardOnline(uint16_t code)   { Serial.println(F("SD Karte online ")); }
+    static void OnCardInserted(uint16_t code) { Serial.println(F("SD Karte bereit ")); }
+    static void OnCardRemoved(uint16_t code)  { Serial.println(F("SD Karte entfernt ")); }
+    static void OnUsbOnline(uint16_t code)    { Serial.println(F("USB online ")); }
+    static void OnUsbInserted(uint16_t code)  { Serial.println(F("USB bereit ")); }
+    static void OnUsbRemoved(uint16_t code)   { Serial.println(F("USB entfernt ")); }
 };
 static DFMiniMp3<HardwareSerial, Mp3Notify> mp3(Serial3);
 
-LiquidCrystal_I2C lcd(0x27, 20, 4); //Hier wird das Display benannt. In unserem //Fall „lcd“. Die I²C Adresse (Erläuterung und I²C Adressen Scanner in folgender Anleitung: Link zur Anleitung „2 I²C Displays gleichzeitig“) 0x27 wird auch angegeben.
+// ---------------------------------------------------------------------------
+// LCD (20x4, I2C-Adresse 0x27)
+// ---------------------------------------------------------------------------
+LiquidCrystal_I2C lcd(0x27, 20, 4);
 
-// Select your modem:
+// ---------------------------------------------------------------------------
+// GSM / Netz (SIM800 ueber Serial1)
+// ---------------------------------------------------------------------------
 #define TINY_GSM_MODEM_SIM800
+#define TINY_GSM_RX_BUFFER 512   // ganze Antwort puffern
+#define SerialAT Serial1         // Hardware-Serial des Mega: RX1 = D19, TX1 = D18
 
-// Increase RX buffer to capture the entire response
-// Chips without internal buffering (A6/A7, ESP8266, M590)
-// need enough space in the buffer for the entire response
-// else data will be lost (and the http library will fail).
-#define TINY_GSM_RX_BUFFER 512
-
-// Set serial for AT commands (to the module)
-// Use Hardware Serial on Mega
-// RX118 & TX119
-#define SerialAT Serial1
-
-// Your GPRS credentials
-// Leave empty, if missing user or pass
-const char apn[]  = "sipgate";
+// GPRS-Zugangsdaten (leer lassen, falls nicht noetig)
+const char apn[]      = "sipgate";
 const char gprsUser[] = "sipgate";
 const char gprsPass[] = "sipgate";
 
-// Server details
+// Server
 const char server[] = "dev.rotmanov.de";
+const int  port     = 9992;
 String url = String("/?number=");
-const int port = 9992;
 
 #include <TinyGsmClient.h>
 #include <ArduinoHttpClient.h>
@@ -105,156 +118,130 @@ TinyGsm modem(SerialAT);
 TinyGsmClient client(modem);
 HttpClient http(client, server, port);
 
-unsigned long startMillis;
-unsigned long stepStartMillis;
-int step = 0;
+// ---------------------------------------------------------------------------
+// Zustand
+// ---------------------------------------------------------------------------
+unsigned long startMillis;       // Anker fuer den Session-Countdown
+unsigned long stepStartMillis;   // Anker fuer schritt-lokale Wartezeiten
+Step step = STEP_GREETING;
 bool refreshDisplay = false;
 bool outOfOrder = false;
 
 String phoneNumber = String("");
-
-String expected = String("4711"); // TODO: ersetze mit angerufener Nummer
+String expected = String("");    // vom Server geliefert (erwarteter PIN)
 String pin = String("");
 
 void setup() {
-  Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle Schnittstelle
+  Serial.begin(115200); // ein paar Debug-Ausgaben ueber die serielle Schnittstelle
   Serial.println("Arduino start");
 
   pinMode(RELAIS_PIN, OUTPUT);
-  digitalWrite(RELAIS_PIN, HIGH); //An dieser Stelle würde das Relais einsschalten
+  digitalWrite(RELAIS_PIN, HIGH); // Relais aus (Klappe zu)
 
-  // DFPlayer Mini initialisieren
   mp3.begin();
-  mp3.setVolume(15);
+  mp3.setVolume(MP3_VOLUME);
 
-  // -> Arduino start -> GSM start
   lcd.begin();
-  lcd.backlight();//Beleuchtung des Displays einschalten
+  lcd.backlight();
   startMillis = millis();
   refreshDisplay = true;
 }
 
-// -> Displayanzeige "Hallo, willkommen zu meinem Cache. Du hast 5 Minuten Zeit und nur einen Versuch."
-// -> Sound abspielen "Hallo, willkommen zu meinem Cache. Du hast 5 Minuten Zeit und nur einen Versuch."
-// -> Display zeigt 5-Minuten-Zähler an
-
 void loop() {
   mp3.loop();
-  if (step == 0) {
-    step0();
-  } else if (step == 1) {
-    step1();
-  } else if (step == 2) {
-    step2();
-  } else if (step == 3) {
-    step3();
-  } else if (step == 4) {
-    step4();
-  } else if (step == 5) {
-    step5();
-  } else if (step == 6) {
-    step6();
-  } else if (step == 7) {
-    step7();
+  switch (step) {
+    case STEP_GREETING:     stepGreeting();    break;
+    case STEP_WELCOME:      stepWelcome();     break;
+    case STEP_ENTER_NUMBER: stepEnterNumber(); break;
+    case STEP_INSERT_COIN:  stepInsertCoin();  break;
+    case STEP_CALL:         stepCall();        break;
+    case STEP_ENTER_PIN:    stepEnterPin();    break;
+    case STEP_RESULT:       stepResult();      break;
+    case STEP_CLOSED:       stepClosed();      break;
   }
   decreaseTimer();
 }
 
-void step0() {
-  if (refreshDisplay == true) {
+// Hoerer ans Ohr -> GSM initialisieren, auf Taste warten
+void stepGreeting() {
+  if (refreshDisplay) {
     showText(
       "H\xEFrer ans Ohr!      ",
       "                    ",
       "Dr""\xF5""cke dann Taste 5 ");
     refreshDisplay = false;
 
-    // Set GSM module baud rate
     SerialAT.begin(19200);
     Serial.println("GSM start");
 
-    // Restart takes quite some time
-    // To skip it, call init() instead of restart()
+    // restart() dauert lange; init() ueberspringt den Neustart
     Serial.println("Initializing modem...");
-    // modem.restart();
     modem.init();
 
     String modemInfo = modem.getModemInfo();
     Serial.print("Modem: ");
     Serial.println(modemInfo);
 
-    if ( GSM_PIN && modem.getSimStatus() != 3 ) {
+    if (GSM_PIN && modem.getSimStatus() != 3) {
       modem.simUnlock(GSM_PIN);
     }
   }
 
-  /*
-  unsigned long currentMillis = millis();
-  int secondsElapsed = (currentMillis - startMillis) / 1000;
-  if (secondsElapsed > 2) {
-  */
-  char key = kpd.getKey();
-  if (key) {
-    step = 1;
-    mp3.playMp3FolderTrack(1);
+  if (kpd.getKey()) {
+    step = STEP_WELCOME;
+    mp3.playMp3FolderTrack(TRACK_WELCOME);
     stepStartMillis = millis();
     refreshDisplay = true;
   }
 }
 
-void step1() {
-  if (refreshDisplay == true) {
+// Begruessung, Netz suchen und Uhrzeit gegen die Oeffnungszeiten pruefen
+void stepWelcome() {
+  if (refreshDisplay) {
     showText(
       "Willkommen!         ",
       "Deine Zeit l\xE1uft... ",
       "                    ");
     refreshDisplay = false;
 
-  unsigned long startMillis = millis();
+    unsigned long netStart = millis();
     Serial.println("Waiting for network...");
 
     modem.waitForNetwork();
     if (modem.isNetworkConnected()) {
-      unsigned long currentMillis = millis();
-      int secondsElapsed = (currentMillis - startMillis) / 1000;
+      int secondsElapsed = (millis() - netStart) / 1000;
       Serial.print("Network connected");
       Serial.println(secondsElapsed);
     }
 
     delay(500);
-    
+
     String gsmTime = modem.getGSMDateTime(DATE_TIME);
     Serial.print("GSM Time:");
     Serial.println(gsmTime);
-    String hour = gsmTime.substring(0, 2);
-    Serial.println(hour);
-    int hourI = hour.toInt();
-    if(hourI > 21) {
+    int hourI = gsmTime.substring(0, 2).toInt();
+    Serial.println(hourI);
+    if (hourI > OPEN_TO_HOUR || hourI < OPEN_FROM_HOUR) {
       outOfOrder = true;
     }
-    if(hourI < 8) {
-      outOfOrder = true;
-    }
-    // String gsmDate = modem.getGSMDateTime(DATE_DATE);
-    // Serial.print("GSM Date:");
-    // Serial.println(gsmDate);
   }
 
-  unsigned long currentMillis = millis();
-  int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
-  if (secondsElapsed > 6) {
-    if(outOfOrder) {
+  int secondsElapsed = (millis() - stepStartMillis) / 1000;
+  if (secondsElapsed > STEP_HOLD_SECONDS) {
+    if (outOfOrder) {
       stepStartMillis = millis();
-      step = 7;
+      step = STEP_CLOSED;
     } else {
-      step = 2;      
-      mp3.playMp3FolderTrack(2);
+      step = STEP_ENTER_NUMBER;
+      mp3.playMp3FolderTrack(TRACK_ENTER_NUMBER);
     }
     refreshDisplay = true;
   }
 }
 
-void step2() {
-  if (refreshDisplay == true) {
+// Handynummer eingeben, Abschluss mit '#'
+void stepEnterNumber() {
+  if (refreshDisplay) {
     lcd.clear();
     showText(
       "Deine Handynummer:  ",
@@ -266,9 +253,9 @@ void step2() {
   char key = kpd.getKey();
   if (key) {
     if (key == '#') {
-      step = 3;
+      step = STEP_INSERT_COIN;
       url.concat(phoneNumber);
-      mp3.playMp3FolderTrack(3);
+      mp3.playMp3FolderTrack(TRACK_INSERT_COIN);
       refreshDisplay = true;
       return;
     }
@@ -277,30 +264,29 @@ void step2() {
   }
 }
 
-void step3() {
-  if (refreshDisplay == true) {
+// Auf den Muenzeinwurf (Lichtschranke) warten
+void stepInsertCoin() {
+  if (refreshDisplay) {
     showText(
       "M\xF5nze einwerfen     ",
       "                    ",
       "(Keine R""\xF5""ckgabe)    ");
-
     refreshDisplay = false;
   }
 
-  // read the analog in value:
   int sensorValue = analogRead(analogInPin);
-
   if (sensorValue != 0) {
-    step = 4;
-    mp3.playMp3FolderTrack(4);
+    step = STEP_CALL;
+    mp3.playMp3FolderTrack(TRACK_THANKS);
     stepStartMillis = millis();
     refreshDisplay = true;
     Serial.println("Pling!");
   }
 }
 
-void step4() {
-  if (refreshDisplay == true) {
+// Server abfragen (liefert PIN, setzt Absender-Rufnummer) und zurueckrufen
+void stepCall() {
+  if (refreshDisplay) {
     showText(
       "Danke.              ",
       "Ich rufe dich an.   ",
@@ -309,7 +295,7 @@ void step4() {
     Serial.print("Waiting for network...");
     if (!modem.waitForNetwork()) {
       Serial.println(" fail");
-      delay(10000);
+      delay(RETRY_DELAY_MS);
       return;
     }
     Serial.println(" OK");
@@ -322,7 +308,7 @@ void step4() {
     Serial.print(apn);
     if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
       Serial.println(" fail");
-      delay(10000);
+      delay(RETRY_DELAY_MS);
       return;
     }
     Serial.println(" OK");
@@ -332,7 +318,7 @@ void step4() {
     int err = http.get(url);
     if (err != 0) {
       Serial.println(F("failed to connect"));
-      delay(10000);
+      delay(RETRY_DELAY_MS);
       return;
     }
 
@@ -340,20 +326,19 @@ void step4() {
     Serial.print(F("Response status code: "));
     Serial.println(status);
     if (!status) {
-      delay(10000);
+      delay(RETRY_DELAY_MS);
       return;
     }
 
     String body = http.responseBody();
+    body.trim();   // evtl. Zeilenumbruch/Whitespace entfernen
     Serial.println(F("Response:"));
     Serial.println(body);
-
     Serial.print(F("Body length is: "));
     Serial.println(body.length());
 
     expected = body;
 
-    // Shutdown
     http.stop();
     Serial.println(F("Server disconnected"));
 
@@ -365,18 +350,19 @@ void step4() {
     Serial.print(F("Calling "));
     Serial.println(phoneNumber);
     modem.callNumber(phoneNumber);
-    delay(5000);
+    delay(CALL_RING_MS);
     modem.callHangup();
     Serial.println(F("Call hung up"));
 
-    step = 5;
-    mp3.playMp3FolderTrack(5);
+    step = STEP_ENTER_PIN;
+    mp3.playMp3FolderTrack(TRACK_ENTER_PIN);
     refreshDisplay = true;
   }
 }
 
-void step5() {
-  if (refreshDisplay == true) {
+// Letzte 4 Ziffern der angezeigten Rufnummer eingeben
+void stepEnterPin() {
+  if (refreshDisplay) {
     lcd.clear();
     showText(
       "Wer rief dich an?   ",
@@ -389,7 +375,7 @@ void step5() {
   if (key) {
     pin.concat(key);
     if (pin.length() == 4) {
-      step = 6;
+      step = STEP_RESULT;
       refreshDisplay = true;
       return;
     }
@@ -397,22 +383,22 @@ void step5() {
   }
 }
 
-void step6() {
-  if (refreshDisplay == true) {
+// Ergebnis: PIN korrekt -> Klappe oeffnen, sonst Hinweis
+void stepResult() {
+  if (refreshDisplay) {
     lcd.clear();
     if (pin == expected) {
+      digitalWrite(RELAIS_PIN, LOW);   // Relais an -> Klappe auf
+      delay(RELAY_PULSE_MS);
+      digitalWrite(RELAIS_PIN, HIGH);  // Relais wieder aus
 
-      digitalWrite(RELAIS_PIN, LOW); //An dieser Stelle würde das Relais einsschalten
-      delay(500);//...eine Sekunde warten
-      digitalWrite(RELAIS_PIN, HIGH); //Und wieder ausschalten
-
-      mp3.playMp3FolderTrack(6);
+      mp3.playMp3FolderTrack(TRACK_SUCCESS);
       showText(
         "Geschafft.          ",
         "Trag dich ein, dann ",
         "Klappe zu.          ");
     } else {
-      mp3.playMp3FolderTrack(8);
+      mp3.playMp3FolderTrack(TRACK_WRONG_PIN);
       showText(
         "PIN nicht korrekt :(",
         "Auflegen &          ",
@@ -422,30 +408,31 @@ void step6() {
   }
 }
 
-// ausserhalb oeffnungszeiten
-void step7() {
-  if (refreshDisplay == true) {
+// Ausserhalb der Oeffnungszeiten
+void stepClosed() {
+  if (refreshDisplay) {
     lcd.clear();
-      mp3.playMp3FolderTrack(7);
-      showText(
-        "Cache-Zeit von      ",
-        "8 Uhr bis 22 Uhr    ",
-        "Sorry. :'-(         ");
+    mp3.playMp3FolderTrack(TRACK_CLOSED);
+    showText(
+      "Cache-Zeit von      ",
+      "8 Uhr bis 22 Uhr    ",
+      "Sorry. :'-(         ");
     refreshDisplay = false;
   }
 
-  unsigned long currentMillis = millis();
-  int secondsElapsed = (currentMillis - stepStartMillis) / 1000;
-  if (secondsElapsed > 6) {
+  int secondsElapsed = (millis() - stepStartMillis) / 1000;
+  if (secondsElapsed > STEP_HOLD_SECONDS) {
     enterSleep();
   }
-  
 }
 
-void showText(char *line1, char *line2, char *line3) {
-  lcd.setCursor(0, 0); //Text soll beim ersten Zeichen in der ersten Reihe beginnen..
-  lcd.print(line1); //In der ersten Zeile soll der Text „Test Zeile 1“ angezeigt werden
-  lcd.setCursor(0, 1); //Genauso geht es bei den weiteren drei Zeilen weiter
+// ---------------------------------------------------------------------------
+// Hilfsfunktionen
+// ---------------------------------------------------------------------------
+void showText(const char *line1, const char *line2, const char *line3) {
+  lcd.setCursor(0, 0);
+  lcd.print(line1);
+  lcd.setCursor(0, 1);
   lcd.print(line2);
   lcd.setCursor(0, 2);
   lcd.print(line3);
@@ -455,8 +442,7 @@ void showText(char *line1, char *line2, char *line3) {
 }
 
 void decreaseTimer() {
-  unsigned long currentMillis = millis();
-  int secondsRemaining = TIME_TO_LIVE - ((currentMillis - startMillis) / 1000);
+  int secondsRemaining = TIME_TO_LIVE - ((millis() - startMillis) / 1000);
   if (secondsRemaining <= 0) {
     enterSleep();
   }
