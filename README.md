@@ -116,8 +116,7 @@ zurückgibt.
 - **`SIPGATE_CREDENTIALS`** muss als Umgebungsvariable gesetzt sein
   (Base64 von `tokenId:token` des sipgate-Accounts).
 - `$deviceId` in `index.php` an das eigene sipgate-Gerät anpassen (neo nutzt oft `e0`/`p0`).
-- Abhängigkeiten via Composer installieren: `composer install`
-  (die `vendor/autoload.php` wird in `index.php` eingebunden).
+- Keine externen Abhängigkeiten: reines PHP mit cURL, kein Composer nötig.
 - `telefoncache.vhost` enthält eine Beispiel-Apache-vHost-Konfiguration.
 
 > Hinweis: Der eigentliche Anruf erfolgt nicht mehr serverseitig, sondern direkt

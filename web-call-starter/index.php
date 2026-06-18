@@ -1,6 +1,4 @@
 <?php
-include_once('vendor/autoload.php');
-
 $credentials = getenv('SIPGATE_CREDENTIALS');
 if(empty($credentials)) {
   die('no credentials defined');
