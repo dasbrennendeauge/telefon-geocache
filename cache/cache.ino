@@ -16,14 +16,15 @@
 // Zeiten
 #define TIME_TO_LIVE       300   // Gesamt-Timeout einer Session in Sekunden
 #define STEP_HOLD_SECONDS    6   // Anzeige-/Ansagedauer (Begruessung, "geschlossen")
+#define ERROR_HOLD_SECONDS   30  // Anzeigedauer bei Netzwerk-/Modemfehler
 #define CALL_RING_MS      5000   // Klingeldauer beim Rueckruf
 #define RETRY_DELAY_MS   10000   // Wartezeit nach Netz-/Verbindungsfehler
-#define RELAY_PULSE_MS     500   // Relais-Impuls zum Oeffnen der Klappe
+#define RELAY_PULSE_MS    1000  // Relais-Impuls zum Oeffnen der Klappe
 #define MP3_VOLUME          15
 
 // Oeffnungszeiten (Stunde, einschliesslich)
 #define OPEN_FROM_HOUR  8
-#define OPEN_TO_HOUR    21
+#define OPEN_TO_HOUR    22
 
 // MP3-Tracks auf der SD-Karte (Ordner 1)
 #define TRACK_WELCOME       1   // Begruessung
@@ -34,6 +35,7 @@
 #define TRACK_SUCCESS       6   // geschafft
 #define TRACK_CLOSED        7   // ausserhalb der Oeffnungszeiten
 #define TRACK_WRONG_PIN     8   // PIN falsch
+#define TRACK_HOLD          9   // Wartemusik waehrend Modem/Anruf-Phase
 
 // Schritte der Zustandsmaschine
 enum Step {
@@ -44,7 +46,8 @@ enum Step {
   STEP_CALL,          // Server abfragen + zurueckrufen
   STEP_ENTER_PIN,     // letzte 4 Ziffern eingeben
   STEP_RESULT,        // Ergebnis (Klappe auf / falsch)
-  STEP_CLOSED         // ausserhalb der Oeffnungszeiten
+  STEP_CLOSED,        // ausserhalb der Oeffnungszeiten
+  STEP_ERROR          // Netzwerk-/Modemfehler -> Owner informieren
 };
 
 // ---------------------------------------------------------------------------
@@ -132,6 +135,14 @@ String phoneNumber = String("");
 String expected = String("");    // vom Server geliefert (erwarteter PIN)
 String pin = String("");
 
+// Vorab deklariert, damit die Schritt-Funktionen sie nutzen koennen.
+// Kooperative Wartefunktionen: ruft mp3.loop() und decreaseTimer() auf,
+// damit MP3-Callbacks und Countdown auch waehrend langer Modem-Wartezeiten
+// weiterlaufen.
+void coopDelay(unsigned long ms);
+bool waitForNetworkCoop(uint32_t timeout_ms = 60000L);
+void coopYield();
+
 void setup() {
   Serial.begin(115200); // ein paar Debug-Ausgaben ueber die serielle Schnittstelle
   Serial.println("Arduino start");
@@ -159,17 +170,20 @@ void loop() {
     case STEP_ENTER_PIN:    stepEnterPin();    break;
     case STEP_RESULT:       stepResult();      break;
     case STEP_CLOSED:       stepClosed();      break;
+    case STEP_ERROR:        stepError();       break;
   }
   decreaseTimer();
 }
 
 // Hoerer ans Ohr -> GSM initialisieren, auf Taste warten
+bool modemReady = false;  // true sobald modem.init() durchgelaufen ist
+
 void stepGreeting() {
-  if (refreshDisplay) {
+  if (refreshDisplay && !modemReady) {
     showText(
-      "H\xEFrer ans Ohr!",
       "",
-      "Dr""\xF5""cke dann Taste 5");
+      "Bitte warten...",
+      "");
     refreshDisplay = false;
 
     SerialAT.begin(19200);
@@ -186,9 +200,20 @@ void stepGreeting() {
     if (GSM_PIN && modem.getSimStatus() != 3) {
       modem.simUnlock(GSM_PIN);
     }
+
+    modemReady = true;
+    refreshDisplay = true;
   }
 
-  if (kpd.getKey()) {
+  if (refreshDisplay && modemReady) {
+    showText(
+      "H\xEFrer ans Ohr!",
+      "",
+      "Dr""\xF5""cke dann Taste 5");
+    refreshDisplay = false;
+  }
+
+  if (modemReady && kpd.getKey()) {
     step = STEP_WELCOME;
     mp3.playMp3FolderTrack(TRACK_WELCOME);
     stepStartMillis = millis();
@@ -208,28 +233,38 @@ void stepWelcome() {
     unsigned long netStart = millis();
     Serial.println("Waiting for network...");
 
-    modem.waitForNetwork();
-    if (modem.isNetworkConnected()) {
+    bool netOk = waitForNetworkCoop();
+    if (netOk) {
       int secondsElapsed = (millis() - netStart) / 1000;
       Serial.print("Network connected");
       Serial.println(secondsElapsed);
+    } else {
+      Serial.println("Network timeout");
     }
 
-    delay(500);
+    coopDelay(500);
 
-    String gsmTime = modem.getGSMDateTime(DATE_TIME);
-    Serial.print("GSM Time:");
-    Serial.println(gsmTime);
-    int hourI = gsmTime.substring(0, 2).toInt();
-    Serial.println(hourI);
-    if (hourI > OPEN_TO_HOUR || hourI < OPEN_FROM_HOUR) {
-      outOfOrder = true;
+    if (netOk) {
+      String gsmTime = modem.getGSMDateTime(DATE_TIME);
+      Serial.print("GSM Time:");
+      Serial.println(gsmTime);
+      int hourI = gsmTime.substring(0, 2).toInt();
+      Serial.println(hourI);
+      if (hourI > OPEN_TO_HOUR || hourI < OPEN_FROM_HOUR) {
+        outOfOrder = true;
+      }
+    } else {
+      // Kein Netz -> Owner informieren statt Oeffnungszeiten zu zeigen
+      outOfOrder = false;
     }
   }
 
   int secondsElapsed = (millis() - stepStartMillis) / 1000;
   if (secondsElapsed > STEP_HOLD_SECONDS) {
-    if (outOfOrder) {
+    if (!modem.isNetworkConnected()) {
+      stepStartMillis = millis();
+      step = STEP_ERROR;
+    } else if (outOfOrder) {
       stepStartMillis = millis();
       step = STEP_CLOSED;
     } else {
@@ -293,10 +328,14 @@ void stepCall() {
       "Ich rufe dich an.",
       "NICHT ABHEBEN!");
 
+    // Warteansage abspielen, solange das Modem arbeitet (Netz, GPRS,
+    // HTTP, Anruf). Wird gestoppt, sobald der Anruf klingelt.
+    mp3.playMp3FolderTrack(TRACK_HOLD);
+
     Serial.print("Waiting for network...");
-    if (!modem.waitForNetwork()) {
+    if (!waitForNetworkCoop()) {
       Serial.println(" fail");
-      delay(RETRY_DELAY_MS);
+      coopDelay(RETRY_DELAY_MS);
       return;
     }
     Serial.println(" OK");
@@ -304,22 +343,24 @@ void stepCall() {
     if (modem.isNetworkConnected()) {
       Serial.println("Network connected");
     }
+    coopYield();
 
     Serial.print(F("Connecting to "));
     Serial.print(apn);
     if (!modem.gprsConnect(apn, gprsUser, gprsPass)) {
       Serial.println(" fail");
-      delay(RETRY_DELAY_MS);
+      coopDelay(RETRY_DELAY_MS);
       return;
     }
     Serial.println(" OK");
+    coopYield();
 
     Serial.print(F("Performing HTTP GET request... "));
     Serial.print(url);
     int err = http.get(url);
     if (err != 0) {
       Serial.println(F("failed to connect"));
-      delay(RETRY_DELAY_MS);
+      coopDelay(RETRY_DELAY_MS);
       return;
     }
 
@@ -327,12 +368,35 @@ void stepCall() {
     Serial.print(F("Response status code: "));
     Serial.println(status);
     if (!status) {
-      delay(RETRY_DELAY_MS);
+      coopDelay(RETRY_DELAY_MS);
       return;
     }
+    coopYield();
 
-    String body = http.responseBody();
-    body.trim();   // evtl. Zeilenumbruch/Whitespace entfernen
+    // responseBody() kooperativ nachgebaut: liest Byte fuer Byte mit
+    // Timeout, dabei wird coopYield() aufgerufen, damit mp3.loop() und
+    // decreaseTimer() weiterlaufen. endOfBodyReached() wird wie im Original
+    // ausgewertet (nutzt Content-Length).
+    String body = "";
+    int bodyLength = http.contentLength();
+    if (bodyLength > 0) {
+      body.reserve(bodyLength);
+    }
+    unsigned long readStart = millis();
+    while (!http.endOfBodyReached()) {
+      if (http.available()) {
+        int c = http.read();
+        if (c >= 0) {
+          body.concat((char)c);
+        }
+      }
+      coopYield();
+      if (millis() - readStart > 10000) {
+        Serial.println(F("Body read timeout"));
+        break;
+      }
+    }
+    body.trim();
     Serial.println(F("Response:"));
     Serial.println(body);
     Serial.print(F("Body length is: "));
@@ -342,18 +406,26 @@ void stepCall() {
 
     http.stop();
     Serial.println(F("Server disconnected"));
+    coopYield();
 
     modem.gprsDisconnect();
     Serial.println(F("GPRS disconnected"));
+    coopYield();
 
     // Nutzer anrufen, damit sein Telefon mit der vom Server gesetzten
     // Absender-Rufnummer (+491579999<code>) klingelt. NICHT abheben.
     Serial.print(F("Calling "));
     Serial.println(phoneNumber);
-    modem.callNumber(phoneNumber);
-    delay(CALL_RING_MS);
-    modem.callHangup();
-    Serial.println(F("Call hung up"));
+    bool ringing = modem.callNumber(phoneNumber);
+    Serial.println(ringing ? F("Ringing") : F("Call failed"));
+    if (ringing) {
+      // Warteansage stoppen, sobald der Anruf klingelt, damit der Spieler
+      // das Klingeln am Hoerer hoert.
+      mp3.stop();
+      coopDelay(CALL_RING_MS);
+      modem.callHangup();
+      Serial.println(F("Call hung up"));
+    }
 
     step = STEP_ENTER_PIN;
     mp3.playMp3FolderTrack(TRACK_ENTER_PIN);
@@ -390,7 +462,7 @@ void stepResult() {
     lcd.clear();
     if (pin == expected) {
       digitalWrite(RELAIS_PIN, LOW);   // Relais an -> Klappe auf
-      delay(RELAY_PULSE_MS);
+      coopDelay(RELAY_PULSE_MS);
       digitalWrite(RELAIS_PIN, HIGH);  // Relais wieder aus
 
       mp3.playMp3FolderTrack(TRACK_SUCCESS);
@@ -423,6 +495,23 @@ void stepClosed() {
 
   int secondsElapsed = (millis() - stepStartMillis) / 1000;
   if (secondsElapsed > STEP_HOLD_SECONDS) {
+    enterSleep();
+  }
+}
+
+// Netzwerk- oder Modemfehler -> Besucher soll den Owner informieren
+void stepError() {
+  if (refreshDisplay) {
+    lcd.clear();
+    showText(
+      "Netzwerk-Fehler!",
+      "Bitte Owner",
+      "informieren.");
+    refreshDisplay = false;
+  }
+
+  int secondsElapsed = (millis() - stepStartMillis) / 1000;
+  if (secondsElapsed > ERROR_HOLD_SECONDS) {
     enterSleep();
   }
 }
@@ -471,4 +560,38 @@ void enterSleep() {
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);
   sleep_enable();
   sleep_mode();
+}
+
+// Kooperative Wartezeit: haelt mp3.loop() (fuer Callbacks wie
+// OnPlayFinished) und den Session-Countdown am Laufen, waehrend gewartet
+// wird. So ruckelt der Timer nicht, wenn laenger auf das Modem oder einen
+// HTTP-Response gewartet wird. Darf nicht aus einem mp3-Callback heraus
+// aufgerufen werden (Rekursion ueber mp3.loop()).
+void coopDelay(unsigned long ms) {
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    mp3.loop();
+    decreaseTimer();
+  }
+}
+
+// Ein einzelner Durchlauf durch mp3.loop() + decreaseTimer().
+// Zum Einstreuen zwischen blockierenden Aufrufen (gprsConnect, http.get,
+// callNumber, ...), damit der Timer zwischen den AT-Kommandos weiterlaeuft.
+void coopYield() {
+  mp3.loop();
+  decreaseTimer();
+}
+
+// Non-blocking Variante von modem.waitForNetwork(): pollt isNetworkConnected()
+// in einer Schleife und haelt dabei mp3.loop() und decreaseTimer() am Leben.
+// Gibt true zurueck, wenn das Netz innerhalb des Timeouts verfuegbar ist.
+bool waitForNetworkCoop(uint32_t timeout_ms) {
+  for (uint32_t start = millis(); millis() - start < timeout_ms;) {
+    if (modem.isNetworkConnected()) {
+      return true;
+    }
+    coopDelay(250);
+  }
+  return false;
 }
